@@ -15,4 +15,8 @@ The Clients/Nodes require:
 The Server/Orchestrator only requires:  
 `sudo apt -y install mosquitto-clients`  
   
+Optional, your own MQTT broker.  
+This works for example:  
+`docker run -d --restart=unless-stopped --name eclipse-mosquitto -p 1883:1883 -p 9001:9001 eclipse-mosquitto`  
+  
 ### Setup
