@@ -1,4 +1,5 @@
-# RoutWire
+# Testing repository for RoutWire
+
 SDN based on WireGuard, VxLan, Babel and MQTT
  - MQTT is used to orchestrate the nodes.
  - WireGuard is used to create a secure mesh.
@@ -20,3 +21,11 @@ This works for example:
 `docker run -d --restart=unless-stopped --name eclipse-mosquitto -p 1883:1883 -p 9001:9001 eclipse-mosquitto`  
   
 ### Setup
+On Nodes and Orchestrator run:  
+`curl https://raw.githubusercontent.com/lorenzo95/RoutWire/master/client-test --output client-test && chmod +x client-test`  
+
+Run the Orchestrator:  
+`./client-test server`  
+  
+Run the Nodes:  
+`sudo ./client-test client`
