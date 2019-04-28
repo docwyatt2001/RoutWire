@@ -4,5 +4,9 @@ SDN based on WireGuard, VxLan, Babel and MQTT
  - WireGuard is used to create a secure mesh
  - VxLan provides a "normal" interface on WireGuard
  - Babel routes local subnets between nodes (By default all bridges i.e. docker)
-
+  
 ### Pre-requesites
+`add-apt-repository ppa:wireguard/wireguard -y`  
+`apt update && sudo apt -y install wireguard mosquitto-clients babeld`  
+  
+### Setup
