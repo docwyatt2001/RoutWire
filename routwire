@@ -21,8 +21,8 @@ trap egress EXIT
 MQTTIP="broker.hivemq.com"
 MQTTPORT="1883"
 
-# For example: date +%s | sha256sum | base64 | head -c 32 ; echo
-MQTTPREFIX="YWIxMzRmZTVmOTUxNjIzMjIwYjQ4ZjI4"
+# For example: date +%s | sha256sum | base64 | head -c 16 ; echo
+MQTTPREFIX="MGUxNjY0YzhiNzk5"
 MQTTCOMMANDS="$MQTTPREFIX/commands"
 MQTTRESULTS="$MQTTPREFIX/results"
 
@@ -255,7 +255,7 @@ done & #This loop runs in background
 #Finnish Anounce loop
 
 # MAIN LOOP
-mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $PUBKEY|base64) |
+mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $PUBKEY|base64|cut -c1-16) |
 while IFS= read -r encline
     log "Received MQTT Message: $encline"
     line=$(mqttdecrypt $encline)
@@ -426,9 +426,9 @@ while IFS= read -r encline
                 noFive=$(echo $FILELINE | head -n1 | awk '{print $5;}')
                 noSix=$(echo $FILELINE | head -n1 | awk '{print $6;}')
 
-                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_wg0 $noThree") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_wg0 $noThree") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64|cut -c1-16)
                 log "Sending wg0 config: $LOCALPEER cmd cmd_config_wg0 $noThree"
-                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_vxlan $noFour $noFive $noSix") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_vxlan $noFour $noFive $noSix") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64|cut -c1-16)
                 log "Sending vxlan config: $LOCALPEER cmd cmd_config_vxlan $noFour $noFive $noSix "
 
                 echo $(mqttencrypt "anounce add_peer $(echo $noThree | cut -d/ -f1) $receivedpeer $endpointip") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS
@@ -474,9 +474,9 @@ while IFS= read -r encline
             #Send config to peer
             RETURNWG=$(echo $receivedpeer cmd cmd_config_wg0 $NEWWGIP)
             log "Sending wg0 config to peer: $RETURNWG"
-            echo $(mqttencrypt "$RETURNWG") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+            echo $(mqttencrypt "$RETURNWG") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64|cut -c1-16)
             RETURNVX=$(echo $receivedpeer cmd cmd_config_vxlan $NEWMAC $NEWVXIP $NEWVV6IP)
-            echo $(mqttencrypt "$RETURNVX") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+            echo $(mqttencrypt "$RETURNVX") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64|cut -c1-16)
             log "Sending new VxLan config to Peer: $RETURNVX"
 
             echo $(mqttencrypt "anounce add_peer $(echo $NEWWGIP | cut -d/ -f1) $receivedpeer $endpointip") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS
@@ -499,7 +499,7 @@ while IFS= read -r encline
                 if [ $noTwo = "endpointip" ] || [ $noTwo = "$endpointip" ]; then
                     continue
                 fi
-                echo $(mqttencrypt "anounce sync_peer $(echo $noThree | cut -d/ -f1) $LOCALPEER $noTwo") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                echo $(mqttencrypt "anounce sync_peer $(echo $noThree | cut -d/ -f1) $LOCALPEER $noTwo") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64|cut -c1-16)
                 log "Sending anounce: anounce sync_peer $(echo $noThree | cut -d/ -f1) $LOCALPEER $noTwo"
         done < $SERVERDIRECTORY/nodes.conf
 
