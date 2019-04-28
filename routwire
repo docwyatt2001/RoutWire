@@ -22,12 +22,12 @@ MQTTIP="broker.hivemq.com"
 MQTTPORT="1883"
 
 # For example: date +%s | sha256sum | base64 | head -c 32 ; echo
-MWTTPREFIX="make something up here"
-MQTTCOMMANDS="$MWTTPREFIX/commands"
-MQTTRESULTS="$MWTTPREFIX/results"
+MQTTPREFIX="YWIxMzRmZTVmOTUxNjIzMjIwYjQ4ZjI4"
+MQTTCOMMANDS="$MQTTPREFIX/commands"
+MQTTRESULTS="$MQTTPREFIX/results"
 
 # Preshared Key for encryption over MQTT
-SECRETPSK="some secret psk"
+SECRETPSK="wtf"
 
 #Logging config
 LOGFILE=$0.log
@@ -78,6 +78,16 @@ if [ "$1" = stop ]; then
     if ip link show wg0vxlan > /dev/null 2>&1; then
         ip link delete dev wg0vxlan
     fi
+    ENDPOINTIF=$(ip -o route get to 8.8.8.8 |  awk '{print $5;}')
+    if iptables -C POSTROUTING -t nat -o $ENDPOINTIF -j MASQUERADE > /dev/null 2>&1 ; then
+      iptables -t nat -D POSTROUTING -o $ENDPOINTIF -j MASQUERADE
+    fi
+    if iptables -C FORWARD -i wg0vxlan -j ACCEPT > /dev/null 2>&1 ; then
+      iptables -D FORWARD -i wg0vxlan -j ACCEPT
+    fi
+    if iptables -C FORWARD -o wg0vxlan -j ACCEPT > /dev/null 2>&1 ; then
+      iptables -D FORWARD -o wg0vxlan -j ACCEPT
+fi
     exit 0
 fi
 
@@ -316,7 +326,7 @@ while IFS= read -r encline
                     while true; do
                       if ping $(echo  $noFive | cut -d/ -f1) -c 3 > /dev/null 2>&1  ; then
                         if [ "$ISDEFAULTROUTE" = true ] ; then
-                          echo "redistribute ip 0.0.0.0/0 eq 0 src-prefix $noFive metric $ROUTEMETRIC" >> babel.conf
+                          echo "redistribute ip 0.0.0.0/0 eq 0  metric $ROUTEMETRIC" >> babel.conf
                           echo "redistribute ip ::/0 eq 0 src-prefix $noSix metric $ROUTEMETRIC" >> babel.conf
                           echo "redistribute local deny" >> babel.conf
                           echo "redistribute deny" >> babel.conf
@@ -325,6 +335,12 @@ while IFS= read -r encline
                           sysctl -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
                           if ! iptables -C POSTROUTING -t nat -o $ENDPOINTIF -j MASQUERADE > /dev/null 2>&1 ; then
                             iptables -t nat -A POSTROUTING -o $ENDPOINTIF -j MASQUERADE
+                          fi
+                          if ! iptables -C FORWARD -i wg0vxlan -j ACCEPT > /dev/null 2>&1 ; then
+                            iptables -A FORWARD -i wg0vxlan -j ACCEPT
+                          fi
+                          if ! iptables -C FORWARD -o wg0vxlan -j ACCEPT > /dev/null 2>&1 ; then
+                            iptables -A FORWARD -o wg0vxlan -j ACCEPT
                           fi
                           break
                         else
