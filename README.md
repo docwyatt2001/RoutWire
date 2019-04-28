@@ -5,7 +5,7 @@ SDN based on WireGuard, VxLan, Babel and MQTT
  - VxLan provides a "normal" interface on top of WireGuard
  - Babel routes local subnets between nodes (By default all bridges i.e. docker)
   
-### Pre-requesites
+### Pre-requisites
 Tested only on 18.04  
   
 The Clients/Nodes require:  
