@@ -26,7 +26,8 @@ This works for example:
 On Nodes and Orchestrator run:  
 `curl https://raw.githubusercontent.com/lorenzo95/RoutWire/master/routwire --output routwire && chmod +x routwire`  
 
-#### Change the config flags and passwords!!! `nano routwire`  
+#### Change the config flags and passwords!!! 
+`nano routwire`  
   
 Run the Orchestrator (Can be one of the Nodes):  
 `./routwire server`  
