@@ -1,0 +1,495 @@
+#!/bin/bash
+
+#exits if a command fails
+set -e
+#errors if an variable is referenced before being set
+set -u
+#shows the commands that get run (mostly for debug)
+#set -x
+
+#Function to do cleanup in case of script failure
+function egress {
+    echo EGRESS
+}
+trap egress EXIT
+
+###
+### Variables (Shared)
+###
+
+# MQTT Config
+MQTTIP="broker.hivemq.com"
+MQTTPORT="1883"
+
+# For example: date +%s | sha256sum | base64 | head -c 32 ; echo
+MWTTPREFIX="YWIxMzRmZTVmOTUxNjIzMjIwYjQ4ZjI4"
+MQTTCOMMANDS="$MWTTPREFIX/commands"
+MQTTRESULTS="$MWTTPREFIX/results"
+
+# Preshared Key for encryption over MQTT
+SECRETPSK="wtf"
+
+#Logging config
+LOGFILE=$0.log
+RETAIN_NUM_LINES=100
+ENALBE_LOG=true
+
+###
+### Variables (Client)
+###
+
+# Place to store the keys
+CLIENTDIRECTORY="/etc/wireguard/keys"
+
+# Prvate or public endpoint IP
+ENDPOINTISPUBLIC=false
+ENDPOINTISNATTED=false
+
+# Routing information
+ISDEFAULTROUTE=true
+ROUTEMETRIC=128
+
+###
+### Variables (Server)
+###
+
+SERVERDIRECTORY=$(pwd)
+POOLWG="169.254.124.0/16"
+POOLV4="172.20.10.0/24"
+# get one here https://simpledns.com/private-ipv6
+POOLV6="fd20:b765:de64:0d5c::/64"
+
+
+mqttencrypt(){
+    echo $1 | openssl enc -aes-128-cbc -A -base64 -salt -pass pass:$SECRETPSK
+}
+
+mqttdecrypt(){
+    echo $1 | openssl enc -aes-128-cbc -a -d -salt -pass pass:$SECRETPSK
+}
+
+#Shutting down the service cleanly
+if [ "$1" = stop ]; then
+    echo "Stopping!"
+    echo $(mqttencrypt $(cat /etc/wireguard/keys/server.pub)) | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS
+    if ip link show wg0 > /dev/null 2>&1; then
+        ip link delete dev wg0
+    fi
+    if ip link show wg0vxlan > /dev/null 2>&1; then
+        ip link delete dev wg0vxlan
+    fi
+    exit 0
+fi
+
+# Setup logging functions
+function logsetup {
+    TMP=$(tail -n $RETAIN_NUM_LINES $LOGFILE 2>/dev/null) && echo "${TMP}" > $LOGFILE
+    exec > >(tee -a $LOGFILE)
+    exec 2>&1
+}
+
+function log {
+    echo -e "\e[1;31m[$(date --rfc-3339=seconds)]: $*\e[0m"
+}
+
+if [ "$ENALBE_LOG" = true ] ; then
+    logsetup
+fi
+
+is_valid_ipv4() {
+  local -a octets=( ${1//\./ } )
+  local RETURNVALUE=0
+
+  # return an error if the IP doesn't have exactly 4 octets
+  [[ ${#octets[@]} -ne 4 ]] && return 1
+
+  for octet in ${octets[@]}
+  do
+    if [[ ${octet} =~ ^[0-9]{1,3}$ ]]
+    then # shift number by 8 bits, anything larger than 255 will be > 0
+      ((RETURNVALUE += octet>>8 ))
+    else # octet wasn't numeric, return error
+      return 1
+    fi
+  done
+  return ${RETURNVALUE}
+}
+
+getnet() {
+    IP=$1
+    PREFIX=$2
+    IFS=. read -r i1 i2 i3 i4 <<< $IP
+    D2B=({0..1}{0..1}{0..1}{0..1}{0..1}{0..1}{0..1}{0..1})
+    binIP=${D2B[$i1]}${D2B[$i2]}${D2B[$i3]}${D2B[$i4]}
+    binIP0=${binIP::$PREFIX}$(printf '0%.0s' $(seq 1 $((32-$PREFIX))))
+    echo $((2#${binIP0::8})).$((2#${binIP0:8:8})).$((2#${binIP0:16:8})).$((2#${binIP0:24:8}))/$2
+}
+
+getip() {
+    ip addr show $1 | grep -Po 'inet \K[\d.]+'
+}
+
+getcidr() {
+    ip addr show $1 | grep -Po 'inet [\d.]+\/\K[\d.]+'
+}
+
+##
+### START OF CLIENT
+##
+if [ "$1" = client ]; then
+
+# Check if run as root
+if [[ $UID -ne 0 ]]; then
+    echo "This script needs to be run as root (with sudo)."
+    exit 1
+fi
+
+#Get local bridge networks for babel redistribution
+myinterfaces=$(ip link show type bridge | grep  '^[0-9]' | awk '{print $2}' | cut -d: -f1)
+echo "keep-unfeasible true" > babel.conf
+echo "default wired true split-horizon true" >> babel.conf
+echo "random-id true" >> babel.conf
+echo "interface wg0vxlan" >> babel.conf
+if [ ! ${#myinterfaces} = 0 ]; then
+    while read -r line; do
+        if  is_valid_ipv4 "$(getip $line)" ; then
+            echo "redistribute ip $(getnet $(getip $line) $(getcidr $line))" >> babel.conf
+        else
+            log "Babeld - Ignoring interface $line"
+        fi
+    done <<< "$myinterfaces"
+fi
+
+#Startup
+if [ ! -d "$CLIENTDIRECTORY" ]; then
+    # Control will enter here if $CLIENTDIRECTORY doesn't exist.
+    log "Config Dir not found. Creating and making new keys."
+    mkdir -p /etc/wireguard/keys
+    chmod 700 /etc/wireguard/keys
+    touch /etc/wireguard/keys/server
+    chmod 600 /etc/wireguard/keys/server
+    wg genkey > /etc/wireguard/keys/server
+    wg pubkey < /etc/wireguard/keys/server > /etc/wireguard/keys/server.pub
+elif [ -d "$CLIENTDIRECTORY" ]; then
+    log "Config Dir found."
+    #check if keys exist.
+    if [ ! -f "$CLIENTDIRECTORY/server" ]; then
+        log "No Key found. Generating new pair"
+        touch /etc/wireguard/keys/server
+        chmod 600 /etc/wireguard/keys/server
+        wg genkey > /etc/wireguard/keys/server
+        wg pubkey < /etc/wireguard/keys/server > /etc/wireguard/keys/server.pub
+    fi
+fi
+
+#Grab correct local interface IP for peers to connect to
+if [ "$ENDPOINTISPUBLIC" = false ]; then
+    ENDPOINTIP=$(ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
+else
+    ENDPOINTIP=$(curl http://checkip.amazonaws.com)
+fi
+
+#Grab interface name for iptables natting
+if [ "$ISDEFAULTROUTE" = true ]; then
+    ENDPOINTIF=$(ip -o route get to 8.8.8.8 |  awk '{print $5;}')
+fi
+
+#Anounce startup to server
+PUBKEY=$(cat /etc/wireguard/keys/server.pub)
+if [ "$ENDPOINTISNATTED" = false ]; then
+    log "Announcing: $PUBKEY $ENDPOINTIP"
+    echo $(mqttencrypt "$PUBKEY $ENDPOINTIP") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS
+else
+    log "Announcing: $PUBKEY"
+    echo $(mqttencrypt "$PUBKEY 0.0.0.0") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS
+fi
+
+#Background Loop for Anounce CMD messages
+while /bin/true; do
+    mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS |
+    while IFS= read -r encline; do
+    log "Received MQTT CMD Message: $encline"
+    line=$(mqttdecrypt $encline)
+    log "Received MQTT CMD Message: $line"
+
+    peer=$(echo $line | head -n1 | awk '{print $1;}')
+#    echo PEER $peer
+    noTwo=$(echo $line | head -n1 | awk '{print $2;}')
+#    echo TWO $noTwo
+    noThree=$(echo $line | head -n1 | awk '{print $3;}')
+#    echo THREE $noThree
+    noFour=$(echo $line | head -n1 | awk '{print $4;}')
+#    echo FOUR $noFour
+    noFive=$(echo $line | head -n1 | awk '{print $5;}')
+#    echo FOUR $noFive
+    noSix=$(echo $line | head -n1 | awk '{print $6;}')
+#    echo SIX $noSix
+
+    if [ $peer = "anounce" ]; then
+        if [ $noTwo = "add_peer" ] && [ ! $noFour = $PUBKEY ]; then
+            bridge fdb append 00:00:00:00:00:00 dev wg0vxlan dst $noThree via wg0
+            if [ $noFive = "0.0.0.0" ]; then
+                wg set wg0 peer $noFour allowed-ips $noThree/32
+                log "Adding new Peer $noThree WITHOUT endpoint"
+            else
+                wg set wg0 peer $noFour allowed-ips $noThree/32 endpoint $noFive:51820
+                log "Adding new Peer $noThree at $noFive:51820"
+            fi
+        elif [ $noTwo = "del_peer" ] && [ ! $noThree = $PUBKEY ]; then
+                wg set wg0 peer $noThree remove
+                log "Removing peer $noThree"
+        fi
+    fi
+    done
+done & #This loop runs in background
+#Finnish Anounce loop
+
+# MAIN LOOP
+mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $PUBKEY|base64) |
+while IFS= read -r encline
+    log "Received MQTT Message: $encline"
+    line=$(mqttdecrypt $encline)
+    log "Received MQTT Message: $line"
+
+    peer=$(echo $line | head -n1 | awk '{print $1;}')
+#    echo PEER $peer
+    noTwo=$(echo $line | head -n1 | awk '{print $2;}')
+#    echo TWO $noTwo
+    noThree=$(echo $line | head -n1 | awk '{print $3;}')
+#    echo THREE $noThree
+    noFour=$(echo $line | head -n1 | awk '{print $4;}')
+#    echo FOUR $noFour
+    noFive=$(echo $line | head -n1 | awk '{print $5;}')
+#    echo FOUR $noFive
+    noSix=$(echo $line | head -n1 | awk '{print $6;}')
+#    echo SIX $noSix
+
+    do
+        RETURNVAL=false
+        if [ $peer = "anounce" ]; then
+            if [ $noTwo = "sync_peer" ]; then
+                bridge fdb append 00:00:00:00:00:00 dev wg0vxlan dst $noThree via wg0
+                if [ $noFive = "0.0.0.0" ]; then
+                    wg set wg0 peer $noFour allowed-ips $noThree/32
+                    log "Adding new Peer $noThree WITHOUT endpoint"
+                else
+                    wg set wg0 peer $noFour allowed-ips $noThree/32 endpoint $noFive:51820
+                    log "Adding new Peer $noThree at $noFive:51820"
+                fi
+            fi
+        elif [ ! $peer = $PUBKEY ]; then
+            continue
+        else
+            if [ $noTwo = "cmd" ]; then
+                if [ "$noThree" = "cmd_getip_private" ]; then
+                    RETURNVAL=$(ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
+                elif [ "$noThree" = "cmd_getip_public" ]; then
+                    RETURNVAL=$(curl http://checkip.amazonaws.com)
+                elif [ "$noThree" = "cmd_config_wg0" ]; then
+                    if ip link show wg0 > /dev/null 2>&1; then
+                        log "Already have wg0. Deleting..."
+                        ip link delete dev wg0
+                    fi
+                    ip link add wg0 type wireguard
+                    ip link set dev wg0 mtu 2016
+                    wg set wg0 listen-port 51820 private-key /etc/wireguard/keys/server
+                    ip addr add $noFour dev wg0
+                    ip link set wg0 up
+
+                    #RETURNVAL=$(ip add show dev wg0)
+                    log "New wg0 created"
+                elif [ "$noThree" = "cmd_config_vxlan" ]; then
+                    if ip link show wg0vxlan > /dev/null 2>&1; then
+                        log "Deleting vxlan interface"
+                        ip link delete dev wg0vxlan
+                    fi
+                    ip link add wg0vxlan address $noFour mtu 1966 type vxlan id 8425532 dstport 4789 ttl 1 noudpcsum || true
+                    ethtool -K wg0vxlan tx off rx off > /dev/null 2>&1
+                    sysctl -w net.ipv4.conf.wg0vxlan.accept_redirects=0 net.ipv4.conf.wg0vxlan.send_redirects=0 net.ipv6.conf.wg0vxlan.accept_redirects=0 > /dev/null 2>&1
+                    ip address add $noFive dev wg0vxlan || true
+                    ip address add $noSix dev wg0vxlan || true
+                    ip link set wg0vxlan up
+                    log "New Vxlan Interface created."
+
+
+                    #Fire up Babeld
+                    while true; do
+                      if ping $(echo  $noFive | cut -d/ -f1) -c 3 > /dev/null 2>&1  ; then
+                        if [ "$ISDEFAULTROUTE" = true ] ; then
+                          echo "redistribute ip 0.0.0.0/0 eq 0 src-prefix $noFive metric $ROUTEMETRIC" >> babel.conf
+                          echo "redistribute ip ::/0 eq 0 src-prefix $noSix metric $ROUTEMETRIC" >> babel.conf
+                          echo "redistribute local deny" >> babel.conf
+                          echo "redistribute deny" >> babel.conf
+                          babeld -c babel.conf &
+
+                          sysctl -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 > /dev/null 2>&1
+                          if ! iptables -C POSTROUTING -t nat -o $ENDPOINTIF -j MASQUERADE > /dev/null 2>&1 ; then
+                            iptables -t nat -A POSTROUTING -o $ENDPOINTIF -j MASQUERADE
+                          fi
+                          break
+                        else
+                          echo "redistribute local deny" >> babel.conf
+                          echo "redistribute deny" >> babel.conf
+                          babeld -c babel.conf &
+                          break
+                        fi
+                      fi
+                    done
+
+                    #RETURNVAL=$(ip add show dev wg0vxlan)
+                elif [ "$noThree" = "cmd_machine-id" ]; then
+                    RETURNVAL=$(cat /etc/machine-id)
+                else
+                    Log "Made it to else statement"
+                fi
+            elif [ $noTwo = "stat" ]; then
+                log "Returning some stats?"
+            fi
+        fi
+
+if [ ! "$RETURNVAL" = false ]
+then
+    echo $(mqttencrypt "$RETURNVAL") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS
+fi
+
+done
+# MAIN LOOP END
+fi
+
+##
+### END OF CLIENT
+##
+
+##
+### START OF SERVER
+##
+if [ "$1" = server ]; then
+
+#Startup
+
+if [ ! -f "$SERVERDIRECTORY/nodes.conf" ]; then
+    log "The nodes file does not exist. Making new one"
+    touch $SERVERDIRECTORY/nodes.conf
+    chmod 600 $SERVERDIRECTORY/nodes.conf
+    echo "peerpubkey endpointip $POOLWG mac-address $POOLV4 $POOLV6" > $SERVERDIRECTORY/nodes.conf
+fi
+
+# MAIN LOOP
+mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS |
+while IFS= read -r encline
+    log "[+] - New Loop"
+    log "Received MQTT message $encline"
+    line=$(mqttdecrypt $encline)
+    log "Received MQTT message $line"
+
+    receivedpeer=$(echo $line | head -n1 | awk '{print $1;}')
+    endpointip=$(echo $line | head -n1 | awk '{print $2;}')
+
+    if [ ${#receivedpeer} -ne 44 ]; then
+        log "[-] - End Loop"
+        continue
+    fi
+
+    if [ ${#endpointip} -eq 0 ]; then
+        echo $(mqttencrypt "anounce del_peer $receivedpeer") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS
+        log "anounce del_peer $receivedpeer"
+        log "[-] - End Loop"
+        continue
+    fi
+
+    do
+        ISACTIONED=false
+        while read FILELINE
+        do
+            LOCALPEER=$(echo $FILELINE | head -n1 | awk '{print $1;}')
+            if [ $receivedpeer = $LOCALPEER ] && [ "$ISACTIONED" = false ]; then
+                log "PEER IS FOUND IN FILE: $LOCALPEER"
+                noTwo=$(echo $FILELINE | head -n1 | awk '{print $2;}')
+                noThree=$(echo $FILELINE | head -n1 | awk '{print $3;}')
+                noFour=$(echo $FILELINE | head -n1 | awk '{print $4;}')
+                noFive=$(echo $FILELINE | head -n1 | awk '{print $5;}')
+                noSix=$(echo $FILELINE | head -n1 | awk '{print $6;}')
+
+                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_wg0 $noThree") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                log "Sending wg0 config: $LOCALPEER cmd cmd_config_wg0 $noThree"
+                echo $(mqttencrypt "$LOCALPEER cmd cmd_config_vxlan $noFour $noFive $noSix") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                log "Sending vxlan config: $LOCALPEER cmd cmd_config_vxlan $noFour $noFive $noSix "
+
+                echo $(mqttencrypt "anounce add_peer $(echo $noThree | cut -d/ -f1) $receivedpeer $endpointip") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS
+                log "Sending anounce: add_peer $(echo $noThree | cut -d/ -f1) $receivedpeer $endpointip"
+                ISACTIONED=true
+            fi
+        done < $SERVERDIRECTORY/nodes.conf
+
+        if [ "$ISACTIONED" = false ] ; then
+            # Make new peer
+            tag=$( tail -n 1 $SERVERDIRECTORY/nodes.conf )
+            LASTWGIP=$(echo $tag | head -n1 | awk '{print $3;}')
+            LASTVXIP=$(echo $tag | head -n1 | awk '{print $5;}')
+            LASTV6IP=$(echo $tag | head -n1 | awk '{print $6;}')
+
+            # Calculate new WG IP
+            baseaddr="$(echo $LASTWGIP | cut -d. -f1-3)"
+            lsv="$(echo $LASTWGIP | cut -d. -f4 | cut -d/ -f1)"
+            cidr="$(echo $LASTWGIP | cut -d. -f4 | cut -d/ -f2)"
+            lsv=$(( $lsv + 1 ))
+            NEWWGIP=$baseaddr.$lsv/$cidr
+            log "Assigned new wg0 IP $NEWWGIP"
+
+            # Calculate new VX IP
+            baseaddr="$(echo $LASTVXIP | cut -d. -f1-3)"
+            lsv="$(echo $LASTVXIP | cut -d. -f4 | cut -d/ -f1)"
+            cidr="$(echo $LASTVXIP | cut -d. -f4 | cut -d/ -f2)"
+            lsv=$(( $lsv + 1 ))
+            NEWVXIP=$baseaddr.$lsv/$cidr
+            log "Assigned new VxLan IP $NEWVXIP"
+
+            # Calculate new V6 IP
+            baseaddr="$(echo $LASTV6IP | cut -d: -f1-5)"
+            lsv="$(echo $LASTV6IP | cut -d: -f6 | cut -d/ -f1)"
+            cidr="$(echo $LASTV6IP | cut -d: -f6 | cut -d/ -f2)"
+            lsv=$(( $lsv + 1 ))
+            NEWVV6IP=$baseaddr:$lsv/$cidr
+            log "Assigned new IPv6 $NEWVV6IP"
+
+            # Make new Mac address
+            NEWMAC=$(printf '68:5d:43:%02X:%02X:%02X\n' $[RANDOM%256] $[RANDOM%256] $[RANDOM%256])
+
+            #Send config to peer
+            RETURNWG=$(echo $receivedpeer cmd cmd_config_wg0 $NEWWGIP)
+            log "Sending wg0 config to peer: $RETURNWG"
+            echo $(mqttencrypt "$RETURNWG") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+            RETURNVX=$(echo $receivedpeer cmd cmd_config_vxlan $NEWMAC $NEWVXIP $NEWVV6IP)
+            echo $(mqttencrypt "$RETURNVX") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+            log "Sending new VxLan config to Peer: $RETURNVX"
+
+            echo $(mqttencrypt "anounce add_peer $(echo $NEWWGIP | cut -d/ -f1) $receivedpeer $endpointip") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS
+            log "Sending anounce: add_peer $(echo $NEWWGIP | cut -d/ -f1) $receivedpeer $endpointip"
+
+            echo "$receivedpeer $endpointip $NEWWGIP $NEWMAC $NEWVXIP $NEWVV6IP" >> $SERVERDIRECTORY/nodes.conf
+            ISACTIONED=true
+
+        fi
+
+        # Update Peers and bridge tables
+        while read FILELINE
+        do
+            LOCALPEER=$(echo $FILELINE | head -n1 | awk '{print $1;}')
+                noTwo=$(echo $FILELINE | head -n1 | awk '{print $2;}')
+                noThree=$(echo $FILELINE | head -n1 | awk '{print $3;}')
+                noFour=$(echo $FILELINE | head -n1 | awk '{print $4;}')
+                noFive=$(echo $FILELINE | head -n1 | awk '{print $5;}')
+                noSix=$(echo $FILELINE | head -n1 | awk '{print $6;}')
+                if [ $noTwo = "endpointip" ] || [ $noTwo = "$endpointip" ]; then
+                    continue
+                fi
+                echo $(mqttencrypt "anounce sync_peer $(echo $noThree | cut -d/ -f1) $LOCALPEER $noTwo") | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTCOMMANDS$(echo $receivedpeer|base64)
+                log "Sending anounce: anounce sync_peer $(echo $noThree | cut -d/ -f1) $LOCALPEER $noTwo"
+        done < $SERVERDIRECTORY/nodes.conf
+
+log "[-] - End Loop"
+done
+fi
+##
+### END OF SERVER
+##
