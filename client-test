@@ -22,12 +22,12 @@ MQTTIP="broker.hivemq.com"
 MQTTPORT="1883"
 
 # For example: date +%s | sha256sum | base64 | head -c 32 ; echo
-MWTTPREFIX="YWIxMzRmZTVmOTUxNjIzMjIwYjQ4ZjI4"
+MWTTPREFIX="make something up here"
 MQTTCOMMANDS="$MWTTPREFIX/commands"
 MQTTRESULTS="$MWTTPREFIX/results"
 
 # Preshared Key for encryption over MQTT
-SECRETPSK="wtf"
+SECRETPSK="some secret psk"
 
 #Logging config
 LOGFILE=$0.log
