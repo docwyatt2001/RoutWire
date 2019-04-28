@@ -33,3 +33,6 @@ Run the Orchestrator (Can be one of the Nodes):
   
 Run the Nodes:  
 `sudo ./routwire client`
+  
+To clean up after the Nodes script:  
+`sudo ./routwire stop` can be run.  
