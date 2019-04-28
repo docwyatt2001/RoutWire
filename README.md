@@ -8,7 +8,11 @@ SDN based on WireGuard, VxLan, Babel and MQTT
 ### Pre-requesites
 Tested only on 18.04  
   
+The Clients/Nodes require:  
 `add-apt-repository ppa:wireguard/wireguard -y`  
 `apt update && sudo apt -y install wireguard mosquitto-clients babeld`  
+  
+The Server/Orchestrator only requires:  
+`sudo apt -y install mosquitto-clients`  
   
 ### Setup
