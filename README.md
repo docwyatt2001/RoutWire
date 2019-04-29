@@ -10,9 +10,9 @@ SDN based on WireGuard, VxLan, Babel and MQTT
    - Including Docker subnets (Won't work if they are the same on all nodes)  
    `nano /etc/docker/daemon.json`  
    `{`  
-         `"bip": "172.xx.0.1/16"`  
-    `}`  
-    `systemctl  restart docker`  
+   `  "bip": "172.xx.0.1/16"`  
+   `}`  
+   `systemctl  restart docker`  
   
 ## Pre-requisites
 Tested only on 18.04  
