@@ -1,7 +1,7 @@
 Testing repository for RoutWire
 ===============================
 
-SDN based on WireGuard, VxLan, Babel and MQTT
+SDN Mesh based on WireGuard, VxLan, Babel and MQTT
  - MQTT is used to orchestrate the nodes (Nodes to Orchestrator communications).
  - WireGuard is used to create a secure mesh.
  - VxLan provides a "normal" interface on top of WireGuard.
