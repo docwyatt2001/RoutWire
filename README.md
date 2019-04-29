@@ -37,4 +37,4 @@ Run the Nodes:
 `sudo ./routwire client`
   
 To tell the other nodes to remove this Peer and do some cleanup, run:  
-`sudo ./routwire stop`  
+`sudo ./routwire stop` on the node that is being removed from the mesh.  
