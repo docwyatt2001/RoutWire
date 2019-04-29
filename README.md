@@ -36,5 +36,5 @@ Run the Orchestrator (Can be one of the Nodes):
 Run the Nodes:  
 `sudo ./routwire client`
   
-To clean up after the Nodes script:  
-`sudo ./routwire stop` can be run.  
+To tell the other nodes to remove this Peer and do some cleanup, run:  
+`sudo ./routwire stop`  
