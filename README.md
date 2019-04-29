@@ -7,7 +7,7 @@ SDN based on WireGuard, VxLan, Babel and MQTT
  - VxLan provides a "normal" interface on top of WireGuard.
  - Babel routes local subnets between nodes.  
    - All Bridges with IPs are redistributed as subnets at the moment.
-   - Including Docker subnets (Won't work if they are the same on all nodes)  
+   - Including Docker subnets (Won't work if they are the same on all nodes). To change:  
    `nano /etc/docker/daemon.json`  
    `{`  
    `  "bip": "172.xx.0.1/16"`  
