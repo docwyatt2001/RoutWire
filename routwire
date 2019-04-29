@@ -255,7 +255,7 @@ done & #This loop runs in background
 #Finnish Anounce loop
 
 # MAIN LOOP
-mqttpeer=$MQTTCOMMANDS$( echo $receivedpeer | base64 | cut -c1-16 )
+mqttpeer=$MQTTCOMMANDS$( echo $PUBKEY | base64 | cut -c1-16 )
 mosquitto_sub -h $MQTTIP -p $MQTTPORT -t $mqttpeer |
 while IFS= read -r encline
     log "Received MQTT Message: $encline"
