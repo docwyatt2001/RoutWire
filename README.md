@@ -36,5 +36,5 @@ Run the Orchestrator (Can be one of the Nodes):
 Run the Nodes:  
 `sudo ./routwire client`
   
-To tell the other nodes to remove this Peer and do some cleanup, run:  
-`sudo ./routwire stop` on the node that is being removed from the mesh.  
+To tell the other Nodes to remove this Peer and do some cleanup, run:  
+`sudo ./routwire stop` on the Node that is being removed from the mesh.  
