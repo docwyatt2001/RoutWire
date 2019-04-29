@@ -1,4 +1,5 @@
-# Testing repository for RoutWire
+Testing repository for RoutWire
+===============================
 
 SDN based on WireGuard, VxLan, Babel and MQTT
  - MQTT is used to orchestrate the nodes (Nodes to Orchestrator communications).
@@ -8,7 +9,7 @@ SDN based on WireGuard, VxLan, Babel and MQTT
    - All Bridges with IPs are redistributed as subnets at the moment.
    - Including Docker subnets (Won't work if they are the same on all nodes)
   
-### Pre-requisites
+## Pre-requisites
 Tested only on 18.04  
   
 The Clients/Nodes require:  
@@ -22,7 +23,7 @@ Optional, your own MQTT Broker.
 This works for example:  
 `docker run -d --restart=unless-stopped --name eclipse-mosquitto -p 1883:1883 -p 9001:9001 eclipse-mosquitto`  
   
-### Setup
+## Setup
 On Nodes and Orchestrator run:  
 `curl https://raw.githubusercontent.com/lorenzo95/RoutWire/master/routwire --output routwire && chmod +x routwire`  
 
