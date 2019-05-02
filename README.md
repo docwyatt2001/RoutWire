@@ -16,6 +16,7 @@ SDN Mesh based on WireGuard, VxLan, Babel and MQTT
   
 ## Pre-requisites
 Tested only on 18.04  
+Tested on Raspberry Pi following this guide https://github.com/adrianmihalko/raspberrypiwireguard  
   
 The Clients/Nodes require:  
 `add-apt-repository ppa:wireguard/wireguard -y`  
