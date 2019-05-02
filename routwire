@@ -22,12 +22,12 @@ MQTTIP="broker.hivemq.com"
 MQTTPORT="1883"
 
 # For example: date +%s | sha256sum | base64 | head -c 16 ; echo
-MQTTPREFIX="SOME SECRET PASSWORD"
+MQTTPREFIX="MGUxNjY0YzhiNzk5"
 MQTTCOMMANDS="$MQTTPREFIX/commands"
 MQTTRESULTS="$MQTTPREFIX/results"
 
 # Preshared Key for encryption over MQTT
-SECRETPSK="SUPER SECRET PASSWORD"
+SECRETPSK="wtf"
 
 #Logging config
 LOGFILE=$0.log
@@ -72,13 +72,22 @@ mqttdecrypt(){
 if [ "$1" = stop ]; then
     echo "Stopping!"
     echo $(mqttencrypt $(cat /etc/wireguard/keys/server.pub)) | mosquitto_pub --stdin-line -h $MQTTIP -p $MQTTPORT -t $MQTTRESULTS
+    STATICROUTES=$(wg show | grep endpoint | awk '{print $2}' | cut -d: -f1)
+    ENDPOINTIF=$(ip -o route get to 8.8.8.8 |  awk '{print $5;}')
+    LOCALDEFAULTROUTE=$(ip route | awk '/default/ { print $3 }')
+
     if ip link show wg0 > /dev/null 2>&1; then
         ip link delete dev wg0
     fi
     if ip link show wg0vxlan > /dev/null 2>&1; then
         ip link delete dev wg0vxlan
     fi
-    ENDPOINTIF=$(ip -o route get to 8.8.8.8 |  awk '{print $5;}')
+
+    for r in $STATICROUTES
+    do
+      ip route del $r via $LOCALDEFAULTROUTE
+    done
+
     if iptables -C POSTROUTING -t nat -o $ENDPOINTIF -j MASQUERADE > /dev/null 2>&1 ; then
       iptables -t nat -D POSTROUTING -o $ENDPOINTIF -j MASQUERADE
     fi
@@ -87,6 +96,8 @@ if [ "$1" = stop ]; then
     fi
     if iptables -C FORWARD -o wg0vxlan -j ACCEPT > /dev/null 2>&1 ; then
       iptables -D FORWARD -o wg0vxlan -j ACCEPT
+
+
 fi
     exit 0
 fi
@@ -204,6 +215,9 @@ if [ "$ISDEFAULTROUTE" = true ]; then
     ENDPOINTIF=$(ip -o route get to 8.8.8.8 |  awk '{print $5;}')
 fi
 
+#Get the local default gateway
+LOCALDEFAULTROUTE=$(ip route | awk '/default/ { print $3 }')
+
 #Anounce startup to server
 PUBKEY=$(cat /etc/wireguard/keys/server.pub)
 if [ "$ENDPOINTISNATTED" = false ]; then
@@ -244,9 +258,18 @@ while /bin/true; do
             else
                 wg set wg0 peer $noFour allowed-ips $noThree/32 endpoint $noFive:51820
                 log "Adding new Peer $noThree at $noFive:51820"
+                  if [ $(ip route show | grep -co $noFive ) = 0 ]; then
+                    ip route add $noFive via $LOCALDEFAULTROUTE
+                  fi
             fi
         elif [ $noTwo = "del_peer" ] && [ ! $noThree = $PUBKEY ]; then
-                wg set wg0 peer $noThree remove
+                PEERIP=$(wg | grep -A 1 $noThree | tail -n 1 | awk '{print $2}' | cut -d: -f1)
+                if [ ! $PEERIP = '' ] ; then
+                  wg set wg0 peer $noThree remove
+                  if [ ! $(ip route show | grep -co $PEERIP) = 0 ] ; then
+                    ip route del $PEERIP via $LOCALDEFAULTROUTE
+                  fi
+                fi
                 log "Removing peer $noThree"
         fi
     fi
@@ -285,6 +308,9 @@ while IFS= read -r encline
                     log "Adding new Peer $noThree WITHOUT endpoint"
                 else
                     wg set wg0 peer $noFour allowed-ips $noThree/32 endpoint $noFive:51820
+                    if [ $(ip route show | grep -co $noFive ) = 0 ]; then
+                      ip route add $noFive via $LOCALDEFAULTROUTE
+                    fi
                     log "Adding new Peer $noThree at $noFive:51820"
                 fi
             fi
@@ -511,4 +537,3 @@ fi
 ##
 ### END OF SERVER
 ##
-
